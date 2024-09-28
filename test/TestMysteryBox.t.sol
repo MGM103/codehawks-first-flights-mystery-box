@@ -6,7 +6,6 @@ import "../src/MysteryBox.sol";
 
 contract MysteryBoxTest is Test {
     uint256 public constant SEED_VALUE = 0.1 ether;
-    uint256 public constant STARTING_BAL = 1 ether;
     MysteryBox public mysteryBox;
     address public owner;
     address public user1;
